@@ -1,0 +1,11 @@
+﻿<Project Sdk="Microsoft.Net.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net5.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <LangVersion>9.0</LangVersion>
+    <PackAsTool>true</PackAsTool>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" Version="2.0.0-beta1.20574.7" />
+  </ItemGroup>
+</Project>
