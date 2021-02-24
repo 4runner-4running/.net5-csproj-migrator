@@ -17,15 +17,15 @@ namespace Net5ProjectMigrator
         private const string CSPROJ_SEARCH_CONSTANT = "*.csproj";
         private const string SCHEMA_MSBUILD = "http://schemas.microsoft.com/developer/msbuild/2003";
         private const string SCHEMA_NUGET = "http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd";
+        private const string PKG_MSFT_SDK = "Microsoft.NET.Test.Sdk";
+        private const string PKG_MSTEST_ADAPTER = "MSTest.TestAdapter";
+        private const string PKG_MSTEST_FRAMEWORK = "MSTest.TestFramework";
 
         private static bool _verbose = false;
         private static bool _recurse = false;
         private static bool _whatIf = false;
         static void Main(string[] args)
         {
-            //todo: build a cmdlet that calls this, allows for options like recurse, etc.
-            //final step would be to call dotnet restore / build against the sln and verify successful build
-
             //Establish root command
             var cmd = new RootCommand
             {
@@ -80,7 +80,6 @@ namespace Net5ProjectMigrator
                 _recurse = recurse;
                 _whatIf = whatIf;
 
-                //Consider color formatting
                 Console.WriteLine(sb.ToString());
 
                 if (_recurse)
@@ -128,8 +127,6 @@ namespace Net5ProjectMigrator
         /// <param name="projPath">File path to the csproj file</param>
         /// <param name="makePackageOnBuild">Specify whether or not to generate a nupkg on build</param>
         /// <param name="nuspecPath">File path to pre-existing nuspec definition</param>
-        /// <param name="verbose">Specify verbose output</param>
-        /// <param name="whatIf">If true, runs without committing changes</param>
         public static void UpgradeProject(string projPath, bool makePackageOnBuild, string nuspecPath)
         {
             DateTime startTime = DateTime.Now;
@@ -196,31 +193,21 @@ namespace Net5ProjectMigrator
             Console.ResetColor();
         }
 
-        public static XmlDocument GetProjectAsXml(string projPath, StringBuilder newCSProjBuilder)
+        private static XmlDocument GetProjectAsXml(string projPath, StringBuilder newCSProjBuilder)
         {
-            Stopwatch sw = new Stopwatch();
             if (_verbose) 
-            {
                 Console.WriteLine("Fetching XmlDocument data...");
-                sw.Start();
-            }
 
             XmlDocument doc = new XmlDocument();
             doc.Load(projPath);
 
             if (_verbose)
-            {
-                sw.Stop();
-                Console.WriteLine("Finished xml retrieval in: ");
-                Console.ForegroundColor = ConsoleColor.Blue;
-                Console.WriteLine($"{sw.ElapsedMilliseconds} ms");
-                Console.ResetColor();
-            }
+                Console.WriteLine("Finished xml retrieval.");
 
             return doc;
         }
 
-        public static string GetPackagesConfigPath(string projPath)
+        private static string GetPackagesConfigPath(string projPath)
         {
             if (_verbose)
                 Console.WriteLine("Fetching packages.config");
@@ -247,14 +234,10 @@ namespace Net5ProjectMigrator
             return combinedPath;
         }
 
-        public static void BuildProjectReferences(XmlDocument doc, XmlNamespaceManager ns, StringBuilder builder)
+        private static void BuildProjectReferences(XmlDocument doc, XmlNamespaceManager ns, StringBuilder builder)
         {
-            Stopwatch sw = new Stopwatch();
             if (_verbose)
-            {
                 Console.WriteLine("Building project references...");
-                sw.Start();
-            }
 
             builder.AppendLine($"\t<ItemGroup>");
             int refProjCount = 0;
@@ -271,17 +254,10 @@ namespace Net5ProjectMigrator
             builder.AppendLine($"\t</ItemGroup>");
 
             if (_verbose)
-            {
-                sw.Stop();
-                Console.Write("Finished building projet references in: ");
-                Console.ForegroundColor = ConsoleColor.Blue;
-                Console.WriteLine($"{sw.ElapsedMilliseconds} ms");
-                Console.ResetColor();
-                Console.WriteLine($"Referenced Projects: {refProjCount}");
-            }
+                Console.WriteLine($"Finished building projet references. Referenced Projects: {refProjCount}");
         }
 
-        public static void BuildPreBuildEvents(XmlDocument doc, XmlNamespaceManager nms, StringBuilder builder)
+        private static void BuildPreBuildEvents(XmlDocument doc, XmlNamespaceManager nms, StringBuilder builder)
         {
             if (_verbose)
             {
@@ -318,7 +294,7 @@ namespace Net5ProjectMigrator
             }
         }
 
-        public static void BuildPostBuildEvents(XmlDocument doc, XmlNamespaceManager nms, StringBuilder builder)
+        private static void BuildPostBuildEvents(XmlDocument doc, XmlNamespaceManager nms, StringBuilder builder)
         {
             if (_verbose)
             {
@@ -355,7 +331,7 @@ namespace Net5ProjectMigrator
             }
         }
 
-        public static void BuildOutputTag(StringBuilder builder, string outputType)
+        private static void BuildOutputTag(StringBuilder builder, string outputType)
         {
             if (_verbose)
                 Console.WriteLine("Building Output tag");
@@ -363,14 +339,13 @@ namespace Net5ProjectMigrator
             builder.AppendLine($"\t\t<OutputType>{outputType}</OutputType>");
         }
 
-        public static void BuildPackageReferences(string pkgConfigPath, bool includeMSTest, StringBuilder builder)
+        private static void BuildPackageReferences(string pkgConfigPath, bool includeMSTest, StringBuilder builder)
         {
-            Stopwatch sw = new Stopwatch();
+            int pkgCount = 0;
+            bool testPkgPresent = false;
+
             if (_verbose)
-            {
                 Console.WriteLine($"Building package references from: {pkgConfigPath}. Include MSTest conversion: {includeMSTest}");
-                sw.Start();
-            }
 
             XmlDocument pkgConfig = new XmlDocument();
             pkgConfig.Load(pkgConfigPath);
@@ -378,34 +353,31 @@ namespace Net5ProjectMigrator
             //possibly add namespace manager
             builder.AppendLine($"\t<ItemGroup>");
 
-            int pkgCount = 0;
-            foreach(XmlNode node in pkgConfig.SelectNodes("//packages/package"))
+            XmlNodeList packageNodes = pkgConfig.SelectNodes("//packages/package");
+            foreach(XmlNode node in packageNodes)
             {
                 pkgCount++;
                 var id = node.Attributes["id"];
+
+                if (id.Value == PKG_MSFT_SDK || id.Value == PKG_MSTEST_ADAPTER || id.Value == PKG_MSTEST_FRAMEWORK)
+                    testPkgPresent = true;
+
                 var version = node.Attributes["version"];
                 if (id != null && version != null)
                     builder.AppendLine($"\t\t<PackageReference Include=\"{id.Value}\" Version=\"{version.Value}\" />");
             }
 
-            //TODO: potential issue with existing test package refs
-            if (includeMSTest)
+            if (includeMSTest && !testPkgPresent)
             {
-                builder.AppendLine("\t\t<PackageReference Include=\"Microsoft.NET.Test.Sdk\" Version=\"15.3.0\" />");
-                builder.AppendLine("\t\t<PackageReference Include=\"MSTest.TestAdapter\" Version=\"1.1.18\" />");
-                builder.AppendLine("\t\t<PackageReference Include=\"MSTest.TestFramework\" Version=\"1.1.18\" />");
+                builder.AppendLine($"\t\t<PackageReference Include=\"{PKG_MSFT_SDK}\" Version=\"15.3.0\" />");
+                builder.AppendLine($"\t\t<PackageReference Include=\"{PKG_MSTEST_ADAPTER}\" Version=\"1.1.18\" />");
+                builder.AppendLine($"\t\t<PackageReference Include=\"{PKG_MSTEST_FRAMEWORK}\" Version=\"1.1.18\" />");
             }
 
             builder.AppendLine($"\t</ItemGroup>");
+            
             if (_verbose)
-            {
-                sw.Stop();
-                Console.Write("Finished building package references in: ");
-                Console.ForegroundColor = ConsoleColor.Blue;
-                Console.WriteLine($"{sw.ElapsedMilliseconds} ms");
-                Console.ResetColor();
-                Console.WriteLine($"Packages ported: {pkgCount}");
-            }
+                Console.WriteLine($"Finished building package references. Packages ported: {pkgCount}.");
         }
 
         private static void Save(StringBuilder builder, string path)
@@ -463,13 +435,10 @@ namespace Net5ProjectMigrator
         }
         private static void BuildNuspecInfo(XmlDocument doc, string nuspecPath, StringBuilder builder)
         {
-            Stopwatch sw = new Stopwatch();
             if (_verbose)
-            {
                 Console.WriteLine($"Building nuspec values. Importing from: {nuspecPath}");
-                sw.Start();
-            }
-            //create xmldoc for nuspec path and pull out relevant info for building the nuget tags
+
+            //Create xmldoc for nuspec path and pull out relevant info for building the nuget tags
             XmlDocument nuspec = new XmlDocument();
             nuspec.Load(nuspecPath);
 
@@ -496,13 +465,7 @@ namespace Net5ProjectMigrator
             builder.AppendLine($"\t\t<description>{desc}</description");
 
             if (_verbose)
-            {
-                sw.Stop();
-                Console.Write("Finished nuspec import in: ");
-                Console.ForegroundColor = ConsoleColor.Blue;
-                Console.WriteLine($"{sw.ElapsedMilliseconds} ms");
-                Console.ResetColor();
-            }
+                Console.Write("Finished nuspec import.");
         }
 
         private static void CloseHeaderSection(StringBuilder builder)
